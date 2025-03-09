@@ -1,0 +1,45 @@
+# Virtual Environment 
+venv/ 
+env/ 
+ENV/  
+  
+# Python cache files  
+__pycache__/  
+*.py[cod] 
+  
+# Distribution / packaging  
+dist/  
+build/  
+*.egg-info/ 
+  
+# Environment variables  
+.env  
+  
+# Logs  
+logs/  
+*.log 
+  
+# IDE specific files  
+.idea/  
+.vscode/  
+*.swp  
+*.swo 
+  
+# OS specific files  
+.DS_Store  
+Thumbs.db  
+  
+# PineconeDB local files  
+pinecone_index/ 
+  
+# Model files  
+*.bin  
+*.pt  
+*.pth  
+  
+# Large data files  
+*.csv  
+*.json  
+  
+# Allow specific files  
+!requirements.txt 
