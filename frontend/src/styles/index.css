@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-background;
+}
+
+.chat-container {
+  @apply max-w-4xl mx-auto p-4;
+}
+
+.message {
+  @apply p-4 rounded-lg mb-4 max-w-[80%];
+}
+
+.user-message {
+  @apply bg-primary text-white ml-auto;
+}
+
+.bot-message {
+  @apply bg-white border border-gray-200 mr-auto;
+}
