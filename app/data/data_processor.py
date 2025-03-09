@@ -170,48 +170,38 @@ class FinancialDataProcessor:
         logger.info(f"Entity resolution complete. Mapped {len(entity_map)} ISINs to companies.")
         return entity_map
     
-    def calculate_wal(self, isin: str) -> Optional[float]:
+    def calculate_weighted_average_life(self, df: pd.DataFrame) -> float:
         """
         Calculate Weighted Average Life (WAL) for a bond
         
         WAL = Σ(t_i × CF_i) / Σ(CF_i)
         
         Args:
-            isin (str): ISIN of the bond
+            df (pd.DataFrame): Cash flow data with payment_date and amount columns
             
         Returns:
             float: Weighted Average Life in years
         """
-        if self.cashflow_df is None:
-            raise ValueError("Data not loaded. Call load_data() first.")
-        
-        # Filter cashflows for the given ISIN
-        bond_cashflows = self.cashflow_df[self.cashflow_df['isin'] == isin]
-        
-        if bond_cashflows.empty:
-            logger.warning(f"No cashflow data found for ISIN {isin}")
+        if df is None or df.empty:
             return None
         
-        # Get issue date from bonds data
-        if self.bonds_df is not None:
-            bond_data = self.bonds_df[self.bonds_df['isin'] == isin]
-            if not bond_data.empty and 'issue_date' in bond_data.columns:
-                issue_date = bond_data['issue_date'].iloc[0]
-            else:
-                issue_date = bond_cashflows['payment_date'].min()
-        else:
-            issue_date = bond_cashflows['payment_date'].min()
+        # Ensure payment_date is datetime
+        if not pd.api.types.is_datetime64_dtype(df['payment_date']):
+            df['payment_date'] = pd.to_datetime(df['payment_date'])
         
-        # Calculate time in years from issue date to each payment date
-        bond_cashflows['years'] = (bond_cashflows['payment_date'] - issue_date).dt.days / 365.25
+        # Calculate days from now to each payment date
+        now = datetime.now()
+        df['days'] = (df['payment_date'] - now).dt.days
         
-        # Calculate WAL
-        total_cf = bond_cashflows['amount'].sum()
+        # Convert days to years
+        df['years'] = df['days'] / 365.25
+        
+        # Calculate weighted average
+        total_cf = df['amount'].sum()
         if total_cf == 0:
-            logger.warning(f"Total cashflow is zero for ISIN {isin}")
             return None
         
-        wal = (bond_cashflows['years'] * bond_cashflows['amount']).sum() / total_cf
+        wal = (df['years'] * df['amount']).sum() / total_cf
         
         return wal
     
@@ -320,7 +310,7 @@ class FinancialDataProcessor:
         bond_dict = bond_data.iloc[0].to_dict()
         
         # Add WAL
-        bond_dict['wal'] = self.calculate_wal(isin)
+        bond_dict['wal'] = self.calculate_weighted_average_life(self.cashflow_df[self.cashflow_df['isin'] == isin])
         
         return bond_dict
     
@@ -404,4 +394,46 @@ class FinancialDataProcessor:
         # Calculate accrued interest
         accrued_interest = principal * rate * total_days / days_in_year
         
-        return accrued_interest 
+        return accrued_interest
+    
+    def calculate_z_score(self, row) -> float:
+        """
+        Calculate Altman Z-Score for a company
+        
+        Z-Score = 1.2*WC/TA + 1.4*RE/TA + 3.3*EBIT/TA + 0.6*MVE/TL + 1.0*S/TA
+        
+        Where:
+        - WC = Working Capital
+        - TA = Total Assets
+        - RE = Retained Earnings
+        - EBIT = Earnings Before Interest and Taxes
+        - MVE = Market Value of Equity
+        - TL = Total Liabilities
+        - S = Sales (Revenue)
+        
+        Args:
+            row: Row from company dataframe
+            
+        Returns:
+            float: Z-Score
+        """
+        try:
+            # Calculate ratios
+            wc_ta = row['working_capital'] / row['total_assets'] if row['total_assets'] != 0 else 0
+            re_ta = row['retained_earnings'] / row['total_assets'] if row['total_assets'] != 0 else 0
+            ebit_ta = row['ebit'] / row['total_assets'] if row['total_assets'] != 0 else 0
+            
+            # For MVE/TL, we'll use a proxy since we might not have market value
+            # Using shareholders_equity as a proxy for MVE
+            mve_tl = row['shareholders_equity'] / row['total_liabilities'] if row['total_liabilities'] != 0 else 0
+            
+            # Revenue to Total Assets
+            s_ta = row['revenue'] / row['total_assets'] if row['total_assets'] != 0 else 0
+            
+            # Calculate Z-Score
+            z_score = 1.2*wc_ta + 1.4*re_ta + 3.3*ebit_ta + 0.6*mve_tl + 1.0*s_ta
+            
+            return z_score
+        except Exception as e:
+            logger.error(f"Error calculating Z-Score: {str(e)}")
+            return 0.0 

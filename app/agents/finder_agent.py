@@ -293,6 +293,28 @@ class FinderAgent:
             "data": sorted_bonds
         }
 
+    def normalize_yields(self, yields: List[float], platforms: List[str]) -> Dict[str, float]:
+        """
+        Normalize yields based on platform reliability
+        
+        Args:
+            yields (List[float]): List of yields
+            platforms (List[str]): List of platforms
+            
+        Returns:
+            Dict[str, float]: Normalized yields by platform
+        """
+        # Define platform weights
+        platform_weights = {'SMEST': 0.85, 'FixedIncome': 0.78, 'Institutional': 0.92, 'Default': 0.80}
+        
+        # Normalize yields
+        normalized_yields = {}
+        for p, y in zip(platforms, yields):
+            weight = platform_weights.get(p, platform_weights['Default'])
+            normalized_yields[p] = y * weight
+        
+        return normalized_yields
+
 # Function to handle finder agent queries in the LangGraph workflow
 def handle_finder(state):
     """

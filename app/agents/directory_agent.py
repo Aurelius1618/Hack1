@@ -38,6 +38,9 @@ class DirectoryAgent:
         # Extract ISIN from query if present
         isin = self._extract_isin(query)
         
+        # Extract claimed issuer if present
+        claimed_issuer = self._extract_issuer(query)
+        
         if isin:
             # Validate ISIN
             if not self.validate_isin(isin):
@@ -46,6 +49,19 @@ class DirectoryAgent:
                     "message": f"Invalid ISIN: {isin}",
                     "data": None
                 }
+            
+            # Check for ISIN-issuer mismatch
+            if claimed_issuer:
+                # Get actual issuer
+                actual_issuer = None
+                if self.data_processor.bonds_df is not None:
+                    bond_data = self.data_processor.bonds_df[self.data_processor.bonds_df['isin'] == isin]
+                    if not bond_data.empty and 'issuer' in bond_data.columns:
+                        actual_issuer = bond_data['issuer'].iloc[0]
+                
+                # Check for mismatch
+                if actual_issuer and self._check_issuer_mismatch(claimed_issuer, actual_issuer):
+                    return self.handle_isin_mismatch(isin, claimed_issuer)
             
             # Get bond details using cached lookup
             bond_details = cached_isin_lookup(isin)
@@ -119,6 +135,58 @@ class DirectoryAgent:
             return isin in self.data_processor.bonds_df['isin'].values
         
         return True
+    
+    def handle_isin_mismatch(self, isin: str, claimed_issuer: str) -> Dict[str, Any]:
+        """
+        Handle ISIN-issuer mismatch
+        
+        Args:
+            isin (str): ISIN code
+            claimed_issuer (str): Claimed issuer name
+            
+        Returns:
+            Dict[str, Any]: Response with mismatch information
+        """
+        # Get actual issuer from database
+        actual_issuer = None
+        if self.data_processor.bonds_df is not None:
+            bond_data = self.data_processor.bonds_df[self.data_processor.bonds_df['isin'] == isin]
+            if not bond_data.empty and 'issuer' in bond_data.columns:
+                actual_issuer = bond_data['issuer'].iloc[0]
+        
+        # Find similar issuers
+        similar_issuers = []
+        if self.data_processor.bonds_df is not None:
+            from rapidfuzz import fuzz
+            
+            # Get unique issuers
+            issuers = self.data_processor.bonds_df['issuer'].unique()
+            
+            # Find similar issuers
+            for issuer in issuers:
+                similarity = fuzz.token_sort_ratio(claimed_issuer, issuer)
+                if similarity >= 70:  # Threshold for similarity
+                    # Get ISIN for this issuer
+                    issuer_isin = self.data_processor.bonds_df[self.data_processor.bonds_df['issuer'] == issuer]['isin'].iloc[0]
+                    similar_issuers.append({
+                        "name": issuer,
+                        "isin": issuer_isin,
+                        "similarity": similarity
+                    })
+            
+            # Sort by similarity
+            similar_issuers = sorted(similar_issuers, key=lambda x: x["similarity"], reverse=True)[:3]
+        
+        return {
+            "status": "error",
+            "message": "ISIN-issuer mismatch",
+            "data": {
+                "isin": isin,
+                "claimed_issuer": claimed_issuer,
+                "actual_issuer": actual_issuer,
+                "similar_issuers": similar_issuers
+            }
+        }
     
     @monitor_query_latency
     def _semantic_search(self, query: str) -> List[Dict[str, Any]]:
@@ -199,6 +267,48 @@ class DirectoryAgent:
         # Return top 5 results
         return results[:5]
 
+    def _extract_issuer(self, query: str) -> Optional[str]:
+        """
+        Extract issuer from query
+        
+        Args:
+            query (str): User query
+            
+        Returns:
+            Optional[str]: Extracted issuer or None
+        """
+        # Pattern for issuer
+        patterns = [
+            r"(?:issuer|company|issued by)\s+(?:is|:)?\s+([A-Za-z\s&]+)(?:\.|\,|$)",
+            r"([A-Za-z\s&]+)(?:'s|\s+issued)\s+bond"
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, query, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        
+        return None
+
+    def _check_issuer_mismatch(self, claimed_issuer: str, actual_issuer: str) -> bool:
+        """
+        Check if there is a mismatch between claimed and actual issuer
+        
+        Args:
+            claimed_issuer (str): Claimed issuer
+            actual_issuer (str): Actual issuer
+            
+        Returns:
+            bool: True if mismatch, False otherwise
+        """
+        from rapidfuzz import fuzz
+        
+        # Calculate similarity
+        similarity = fuzz.token_sort_ratio(claimed_issuer, actual_issuer)
+        
+        # Return True if similarity is below threshold
+        return similarity < 85
+
 # Function to handle directory agent queries in the LangGraph workflow
 def handle_directory(state):
     """
@@ -216,10 +326,38 @@ def handle_directory(state):
     agent = DirectoryAgent()
     agent.initialize()
     
+    # Use actor-critic flow for reasoning
+    from app.utils.model_config import actor_critic_flow
+    reasoning_result = actor_critic_flow(query)
+    
+    # Add reasoning to state
+    state["reasoning_chain"].append(reasoning_result["reasoning"])
+    
     # Process query
     result = agent.process_query(query)
     
     # Update state
     state["agent_results"] = result
     
-    return state 
+    # Extract entities from result
+    if result["status"] == "success" and result["data"]:
+        # Extract bond details
+        if isinstance(result["data"], list):
+            # Multiple bonds
+            for bond in result["data"]:
+                for key, value in bond.items():
+                    if key not in ["search_score"]:
+                        state["parsed_entities"][key] = value
+                break  # Just use the first bond for entities
+        else:
+            # Single bond
+            for key, value in result["data"].items():
+                if key not in ["search_score"]:
+                    state["parsed_entities"][key] = value
+    
+    # Update financial context
+    state["financial_context"]["bond_type"] = state["parsed_entities"].get("bond_type")
+    state["financial_context"]["issuer"] = state["parsed_entities"].get("issuer")
+    state["financial_context"]["sector"] = state["parsed_entities"].get("sector")
+    
+    return state

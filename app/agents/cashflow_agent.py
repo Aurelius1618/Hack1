@@ -291,6 +291,97 @@ class CashFlowAgent:
             }
         }
 
+    def accrued_interest(self, settlement: datetime, coupon_dates: List[datetime], 
+                       coupon_rate: float, principal: float, dcc: str = "30/360") -> float:
+        """
+        Calculate accrued interest based on day count convention
+        
+        Args:
+            settlement (datetime): Settlement date
+            coupon_dates (List[datetime]): List of coupon payment dates
+            coupon_rate (float): Annual coupon rate (as decimal)
+            principal (float): Bond principal amount
+            dcc (str): Day count convention
+            
+        Returns:
+            float: Accrued interest
+        """
+        try:
+            # Import business date library if available
+            try:
+                from businessdate import BusinessDate, BusinessRange
+                has_business_date = True
+            except ImportError:
+                has_business_date = False
+                logger.warning("BusinessDate library not available, using standard datetime")
+            
+            # Find the previous and next coupon dates
+            prev_date = None
+            next_date = None
+            
+            for date in sorted(coupon_dates):
+                if date <= settlement:
+                    prev_date = date
+                elif date > settlement and next_date is None:
+                    next_date = date
+            
+            if prev_date is None or next_date is None:
+                logger.warning("Could not determine coupon period")
+                return 0.0
+            
+            # Calculate days based on day count convention
+            if dcc == "30/360":
+                # 30/360 convention
+                # Each month is treated as having 30 days
+                # Each year is treated as having 360 days
+                y1, m1, d1 = prev_date.year, prev_date.month, min(30, prev_date.day)
+                y2, m2, d2 = settlement.year, settlement.month, min(30, settlement.day)
+                
+                days_in_period = 360 * (y2 - y1) + 30 * (m2 - m1) + (d2 - d1)
+                
+                # Calculate total days in coupon period
+                y3, m3, d3 = next_date.year, next_date.month, min(30, next_date.day)
+                total_days = 360 * (y3 - y1) + 30 * (m3 - m1) + (d3 - d1)
+                
+            elif dcc == "ACT/ACT":
+                # ACT/ACT convention
+                if has_business_date:
+                    # Use BusinessDate for more accurate calculations
+                    bd_prev = BusinessDate(prev_date)
+                    bd_settlement = BusinessDate(settlement)
+                    bd_next = BusinessDate(next_date)
+                    
+                    days_in_period = (bd_settlement - bd_prev).days
+                    total_days = (bd_next - bd_prev).days
+                else:
+                    # Fallback to standard datetime
+                    days_in_period = (settlement - prev_date).days
+                    total_days = (next_date - prev_date).days
+            
+            elif dcc == "ACT/360":
+                # ACT/360 convention
+                days_in_period = (settlement - prev_date).days
+                total_days = 360
+            
+            elif dcc == "ACT/365":
+                # ACT/365 convention
+                days_in_period = (settlement - prev_date).days
+                total_days = 365
+            
+            else:
+                # Default to actual days
+                days_in_period = (settlement - prev_date).days
+                total_days = (next_date - prev_date).days
+            
+            # Calculate accrued interest
+            accrued_interest = (days_in_period / total_days) * coupon_rate * principal
+            
+            return accrued_interest
+        
+        except Exception as e:
+            logger.error(f"Error calculating accrued interest: {str(e)}")
+            return 0.0
+
 # Function to handle cash flow agent queries in the LangGraph workflow
 def handle_cashflow(state):
     """

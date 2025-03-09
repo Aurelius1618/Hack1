@@ -2,6 +2,7 @@ import os
 import pinecone
 from dotenv import load_dotenv
 import logging
+from typing import Dict, List, Any, Optional, Union
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -13,6 +14,38 @@ load_dotenv()
 # Get Pinecone API key from environment variables
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT", "gcp-starter")
+
+# Define a HybridQuery class for improved hybrid search
+class HybridQuery:
+    """
+    Class for hybrid search queries combining dense and sparse vectors
+    """
+    def __init__(self, sparse_vector: Dict[str, Union[List[int], List[float]]], 
+                 dense_vector: List[float], alpha: float = 0.7):
+        """
+        Initialize a hybrid query
+        
+        Args:
+            sparse_vector (Dict): Sparse vector with indices and values
+            dense_vector (List[float]): Dense vector
+            alpha (float): Weight between sparse and dense (0 = sparse only, 1 = dense only)
+        """
+        self.sparse_vector = sparse_vector
+        self.dense_vector = dense_vector
+        self.alpha = alpha
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert to dictionary format for Pinecone
+        
+        Returns:
+            Dict[str, Any]: Dictionary representation
+        """
+        return {
+            "vector": self.dense_vector,
+            "sparse_vector": self.sparse_vector,
+            "alpha": self.alpha
+        }
 
 def initialize_pinecone():
     """
@@ -108,6 +141,9 @@ def hybrid_search(query, namespace="bond_metadata", top_k=5, alpha=0.7):
     dense_vec = get_dense_embedding(query)
     sparse_vec = get_sparse_embedding(query)
     
+    # Create hybrid query
+    hybrid_query = HybridQuery(sparse_vec, dense_vec, alpha)
+    
     # Get the index
     index = get_pinecone_index(namespace.split('/')[0])
     if not index:
@@ -117,12 +153,10 @@ def hybrid_search(query, namespace="bond_metadata", top_k=5, alpha=0.7):
     # Perform hybrid search
     try:
         results = index.query(
-            vector=dense_vec,
-            sparse_vector=sparse_vec,
+            **hybrid_query.to_dict(),
             top_k=top_k,
             namespace=namespace,
-            include_metadata=True,
-            alpha=alpha  # Weight between sparse and dense
+            include_metadata=True
         )
         return results
     except Exception as e:

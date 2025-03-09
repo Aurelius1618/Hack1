@@ -176,4 +176,115 @@ def fallback_classify_query(query: str) -> Dict[str, Any]:
             "next_node": "screener",
             "confidence": 0.85,
             "reasoning": "Query is about screening bonds or analyzing financial health"
-        } 
+        }
+
+def actor_critic_flow(query: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+    """
+    Implement SQUID SQUAD's Contrastive CoT Methodology for financial reasoning
+    
+    Args:
+        query (str): User query
+        context (Dict[str, Any]): Additional context
+        
+    Returns:
+        Dict[str, Any]: Best reasoning path and result
+    """
+    model, tokenizer = get_mistral_model()
+    
+    if model is None or tokenizer is None:
+        # Fallback to simpler reasoning
+        return {
+            "reasoning": f"Direct answer to: {query}",
+            "result": None
+        }
+    
+    # Define reasoning strategies
+    strategies = ['financial', 'legal', 'operational']
+    
+    # Generate multiple reasoning paths
+    thoughts = []
+    
+    for strategy in strategies:
+        # Create prompt for this strategy
+        prompt = f"""
+        Think through this bond-related query using {strategy} reasoning:
+        
+        Query: {query}
+        
+        Step-by-step {strategy} analysis:
+        1. 
+        """
+        
+        # Generate reasoning
+        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=200,
+                temperature=0.7,
+                top_p=0.9,
+                num_return_sequences=1
+            )
+        
+        # Extract reasoning
+        reasoning = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        reasoning = reasoning.replace(prompt, "").strip()
+        
+        thoughts.append({
+            "strategy": strategy,
+            "reasoning": reasoning
+        })
+    
+    # Critic evaluation
+    scores = []
+    
+    for thought in thoughts:
+        # Create critic prompt
+        critic_prompt = f"""
+        Evaluate this reasoning for a bond-related query:
+        
+        Query: {query}
+        
+        Reasoning ({thought['strategy']}):
+        {thought['reasoning']}
+        
+        Rate this reasoning from 0-10 based on:
+        - Financial accuracy
+        - Logical coherence
+        - Relevance to query
+        
+        Rating (0-10):
+        """
+        
+        # Generate critic score
+        inputs = tokenizer(critic_prompt, return_tensors="pt").to(model.device)
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=10,
+                temperature=0.1,
+                top_p=0.9,
+                num_return_sequences=1
+            )
+        
+        # Extract score
+        score_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        score_text = score_text.replace(critic_prompt, "").strip()
+        
+        # Parse score
+        try:
+            score = float(re.search(r'\d+(?:\.\d+)?', score_text).group(0))
+        except:
+            score = 5.0  # Default score
+        
+        scores.append(score)
+    
+    # Get best reasoning
+    best_index = scores.index(max(scores))
+    best_thought = thoughts[best_index]
+    
+    return {
+        "reasoning": best_thought["reasoning"],
+        "strategy": best_thought["strategy"],
+        "score": scores[best_index]
+    } 

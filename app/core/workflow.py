@@ -1,4 +1,4 @@
-from typing import TypedDict, Literal, Dict, Any, Optional
+from typing import TypedDict, Literal, Dict, Any, Optional, List, Union
 from langgraph.graph import StateGraph, END
 import os
 from dotenv import load_dotenv
@@ -19,6 +19,10 @@ class AgentState(TypedDict):
     results: dict
     routing_data: dict
     agent_results: dict
+    parsed_entities: Dict[str, Union[str, float]]  # Added for entity extraction
+    reasoning_chain: List[str]  # Added for tracking reasoning steps
+    validation_flags: Dict[str, bool]  # Added for validation tracking
+    financial_context: Dict[str, Any]  # Added for financial domain context
 
 # Define the main workflow
 def create_workflow():
@@ -78,6 +82,13 @@ def route_query(state: AgentState) -> AgentState:
     
     # Update the state
     state["routing_data"] = routing_data
+    
+    # Initialize new fields
+    state["parsed_entities"] = {}
+    state["reasoning_chain"] = ["Query received", f"Classified as {routing_data['next_node']}"]
+    state["validation_flags"] = {"isin_valid": isin_match is not None}
+    state["financial_context"] = {}
+    
     logger.info(f"Routing query to {routing_data['next_node']} with confidence {routing_data['confidence']}")
     return state
 

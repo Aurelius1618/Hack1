@@ -1,45 +1,37 @@
-langchain
-langgraph
-langchain-ollama
-langchain-openai
-langchain-google-genai
-langchain-groq
-pydantic
-python-dotenv
-langchain-unstructured
-unstructured-client
-langchain-community
-unstructured
-pdfminer-six
-pi-heif
-unstructured-inference
-unstructured-pytesseract
-networkx
-matplotlib
-fastapi[standard]
-uvicorn
-pandas
-numpy
-pinecone-client
-regex
-typing-extensions
-python-multipart
-requests
-aiohttp
-xgboost
-shap
-scikit-learn
-rapidfuzz
-python-dateutil
-businessdate
-nltk
-rank_bm25
-transformers>=4.34.0
+# Core dependencies
+langchain>=0.1.0
+langgraph>=0.0.15
+pinecone-client>=2.2.2
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+
+# Machine learning and NLP
+transformers>=4.30.0
 torch>=2.0.0
+sentence-transformers>=2.2.2
+xgboost>=1.7.5
+shap>=0.42.0
+scikit-learn>=1.2.2
+rank_bm25>=0.2.2
+nltk>=3.8.1
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+pymupdf>=1.22.5  # For PDF processing
+rapidfuzz>=3.0.0  # For fuzzy matching
+dask>=2023.5.0  # For parallel processing
+businessdate>=1.0.0  # For business date calculations
+
+# Quantization
 bitsandbytes>=0.41.0
-peft>=0.5.0
-accelerate>=0.21.0
-sentencepiece
-dask
-usearch
-pymupdf
+peft>=0.5.0  # For LoRA adapters
+
+# Monitoring and logging
+prometheus-client>=0.17.0
+logging>=0.4.9
+
+# Web API
+fastapi>=0.100.0
+uvicorn>=0.22.0
+pydantic>=2.0.0
