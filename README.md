@@ -58,8 +58,8 @@ The system is built on a state machine using LangGraph's `StateGraph` with 5 nod
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/tap-bonds-ai.git
-cd tap-bonds-ai
+git clone https://github.com/Aurelius1618/Hack1.git
+cd Hack1
 ```
 
 2. Create a virtual environment:
@@ -145,7 +145,7 @@ The system uses three main data sources:
 ## Project Structure
 
 ```
-tap-bonds-ai/
+Hack1/
 ├── app/
 │   ├── agents/
 │   │   ├── directory_agent.py
@@ -164,8 +164,11 @@ tap-bonds-ai/
 │   │   ├── app.js
 │   │   └── styles.css
 │   └── utils/
+│       ├── document_processor.py
 │       ├── embeddings.py
-│       └── monitoring.py
+│       ├── model_config.py
+│       ├── monitoring.py
+│       └── optimization.py
 ├── tests/
 │   ├── test_validation.py
 │   └── run_tests.py
