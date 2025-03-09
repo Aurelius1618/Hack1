@@ -89,6 +89,7 @@ def classify_query(query: str) -> Dict[str, Any]:
         - finder: Queries about comparing yields or finding bonds with specific returns
         - cashflow: Queries about cash flow schedules or payment details
         - screener: Queries about screening bonds or analyzing financial health
+        - yield_calculator: Queries about calculating yield to maturity, bond prices, or duration
         
         Query: {query}
         
@@ -115,7 +116,8 @@ def classify_query(query: str) -> Dict[str, Any]:
             "directory": "directory",
             "finder": "finder",
             "cashflow": "cashflow",
-            "screener": "screener"
+            "screener": "screener",
+            "yield_calculator": "yield_calculator"
         }
         
         # Get the closest matching category
@@ -158,6 +160,12 @@ def fallback_classify_query(query: str) -> Dict[str, Any]:
             "next_node": "directory",
             "confidence": 0.92,
             "reasoning": "Query contains ISIN code or explicitly asks for bond details"
+        }
+    elif any(keyword in query.lower() for keyword in ["ytm", "yield to maturity", "clean price", "dirty price", "duration", "macaulay", "modified duration"]):
+        return {
+            "next_node": "yield_calculator",
+            "confidence": 0.90,
+            "reasoning": "Query is about calculating yield to maturity, bond prices, or duration"
         }
     elif any(keyword in query.lower() for keyword in ["yield", "compare", "best", "highest", "return", "apy", "interest"]):
         return {

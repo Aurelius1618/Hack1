@@ -361,8 +361,7 @@ class ScreenerAgent:
             probabilities = self.financial_health_model.predict_proba(X)
             
             # Generate SHAP explanations
-            explainer = shap.TreeExplainer(self.financial_health_model)
-            shap_values = explainer.shap_values(X)
+            shap_explanations = self._generate_shap_explanations(self.financial_health_model, X)
             
             # Map predictions back to bonds
             for i, bond in enumerate(bonds):
@@ -372,7 +371,7 @@ class ScreenerAgent:
                     bond['financial_health'] = {
                         'category': int(predictions[idx]),
                         'probability': float(max(probabilities[idx])),
-                        'explanation': self._generate_shap_explanation(shap_values[int(predictions[idx])][idx], X.iloc[idx], self.feature_names)
+                        'explanation': shap_explanations["explanations"][int(predictions[idx])]
                     }
             
             return bonds
@@ -380,45 +379,93 @@ class ScreenerAgent:
             logger.error(f"Error assessing financial health: {str(e)}")
             return bonds
             
-    def _generate_shap_explanation(self, shap_values, feature_values, feature_names):
+    def _generate_shap_explanations(self, model, X_sample):
         """
-        Generate human-readable explanations from SHAP values
+        Generate SHAP explanations for model predictions
         
         Args:
-            shap_values: SHAP values for a single prediction
-            feature_values: Feature values for the prediction
-            feature_names: Names of the features
+            model: Trained model
+            X_sample: Sample data for explanation
             
         Returns:
-            Dict[str, Any]: Human-readable explanation
+            Dict: SHAP explanations
         """
-        # Pair feature names with their SHAP values
-        feature_impacts = list(zip(feature_names, shap_values))
-        
-        # Sort by absolute impact
-        feature_impacts.sort(key=lambda x: abs(x[1]), reverse=True)
-        
-        # Take top 5 most impactful features
-        top_features = feature_impacts[:5]
-        
-        # Generate explanations
-        explanations = []
-        for feature_name, impact in top_features:
-            if impact > 0:
-                direction = "positively"
-            else:
-                direction = "negatively"
-                
-            value = feature_values[feature_name]
-            explanations.append({
-                "feature": feature_name,
-                "impact": float(abs(impact)),
-                "direction": direction,
-                "value": float(value),
-                "explanation": f"{feature_name.replace('_', ' ').title()} ({value:.2f}) impacts {direction} with strength {abs(impact):.2f}"
-            })
+        try:
+            # Create SHAP explainer
+            explainer = shap.TreeExplainer(model)
             
-        return explanations
+            # Calculate SHAP values
+            shap_values = explainer.shap_values(X_sample)
+            
+            # Get feature importance
+            feature_importance = {}
+            for i, feature in enumerate(self.feature_names):
+                importance = np.abs(shap_values[:, i]).mean()
+                feature_importance[feature] = float(importance)
+            
+            # Sort features by importance
+            sorted_features = sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)
+            
+            # Generate explanations
+            explanations = []
+            for feature, importance in sorted_features[:5]:  # Top 5 features
+                explanations.append({
+                    "feature": feature,
+                    "importance": importance,
+                    "description": self._get_feature_description(feature)
+                })
+            
+            return {
+                "explanations": explanations,
+                "summary": self._generate_explanation_summary(explanations)
+            }
+        except Exception as e:
+            logger.error(f"Error generating SHAP explanations: {str(e)}")
+            return {
+                "explanations": [],
+                "summary": "Unable to generate explanations"
+            }
+
+    def _get_feature_description(self, feature):
+        """
+        Get description for a financial feature
+        
+        Args:
+            feature: Feature name
+            
+        Returns:
+            str: Feature description
+        """
+        descriptions = {
+            "interest_coverage_ratio": "Ability to pay interest on outstanding debt",
+            "debt_to_equity_ratio": "Proportion of equity and debt used to finance assets",
+            "current_ratio": "Ability to pay short-term obligations",
+            "quick_ratio": "Ability to pay short-term obligations with liquid assets",
+            "return_on_assets": "How efficiently assets are being used",
+            "return_on_equity": "How efficiently equity is being used",
+            "profit_margin": "Percentage of revenue retained after all expenses",
+            "debt_service_coverage_ratio": "Ability to service debt with operating income"
+        }
+        
+        return descriptions.get(feature, "Financial health indicator")
+
+    def _generate_explanation_summary(self, explanations):
+        """
+        Generate a summary of the explanations
+        
+        Args:
+            explanations: List of explanations
+            
+        Returns:
+            str: Summary
+        """
+        if not explanations:
+            return "No explanations available"
+        
+        top_feature = explanations[0]["feature"]
+        top_description = explanations[0]["description"]
+        
+        return f"The most important factor in this assessment is {top_feature} ({top_description}), followed by {explanations[1]['feature']} and {explanations[2]['feature']}."
     
     def analyze_portfolio(self, isins: List[str]) -> Dict[str, Any]:
         """

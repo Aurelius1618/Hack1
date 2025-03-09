@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 from rapidfuzz import fuzz
 from sklearn.ensemble import IsolationForest
 from datetime import datetime
@@ -398,42 +398,89 @@ class FinancialDataProcessor:
     
     def calculate_z_score(self, row) -> float:
         """
-        Calculate Altman Z-Score for a company
+        Calculate Altman Z-Score for financial health assessment
         
-        Z-Score = 1.2*WC/TA + 1.4*RE/TA + 3.3*EBIT/TA + 0.6*MVE/TL + 1.0*S/TA
+        Z = 1.2A + 1.4B + 3.3C + 0.6D + 1.0E
         
         Where:
-        - WC = Working Capital
-        - TA = Total Assets
-        - RE = Retained Earnings
-        - EBIT = Earnings Before Interest and Taxes
-        - MVE = Market Value of Equity
-        - TL = Total Liabilities
-        - S = Sales (Revenue)
+        - A = Working Capital/Total Assets
+        - B = Retained Earnings/Total Assets
+        - C = EBIT/Total Assets
+        - D = Market Value of Equity/Total Liabilities
+        - E = Sales/Total Assets
         
         Args:
-            row: Row from company dataframe
+            row: DataFrame row with financial data
             
         Returns:
-            float: Z-Score
+            float: Altman Z-Score
         """
         try:
-            # Calculate ratios
-            wc_ta = row['working_capital'] / row['total_assets'] if row['total_assets'] != 0 else 0
-            re_ta = row['retained_earnings'] / row['total_assets'] if row['total_assets'] != 0 else 0
-            ebit_ta = row['ebit'] / row['total_assets'] if row['total_assets'] != 0 else 0
+            # Extract required financial metrics
+            working_capital = row.get('current_assets', 0) - row.get('current_liabilities', 0)
+            total_assets = row.get('total_assets', 1)  # Avoid division by zero
+            retained_earnings = row.get('retained_earnings', 0)
+            ebit = row.get('ebit', 0)
+            market_value_equity = row.get('market_cap', 0)
+            total_liabilities = row.get('total_liabilities', 1)  # Avoid division by zero
+            sales = row.get('revenue', 0)
             
-            # For MVE/TL, we'll use a proxy since we might not have market value
-            # Using shareholders_equity as a proxy for MVE
-            mve_tl = row['shareholders_equity'] / row['total_liabilities'] if row['total_liabilities'] != 0 else 0
-            
-            # Revenue to Total Assets
-            s_ta = row['revenue'] / row['total_assets'] if row['total_assets'] != 0 else 0
+            # Calculate components
+            A = working_capital / total_assets
+            B = retained_earnings / total_assets
+            C = ebit / total_assets
+            D = market_value_equity / total_liabilities
+            E = sales / total_assets
             
             # Calculate Z-Score
-            z_score = 1.2*wc_ta + 1.4*re_ta + 3.3*ebit_ta + 0.6*mve_tl + 1.0*s_ta
+            z_score = 1.2*A + 1.4*B + 3.3*C + 0.6*D + 1.0*E
             
             return z_score
         except Exception as e:
             logger.error(f"Error calculating Z-Score: {str(e)}")
-            return 0.0 
+            return 0.0
+    
+    def handle_isin_mismatch(self, isin: str, claimed_issuer: str) -> Dict[str, Any]:
+        """
+        Handle ISIN-Issuer mismatch
+        
+        Args:
+            isin (str): ISIN code
+            claimed_issuer (str): Claimed issuer name
+            
+        Returns:
+            Dict[str, Any]: Mismatch information
+        """
+        # Get actual issuer
+        actual_issuer = None
+        if self.bonds_df is not None and not self.bonds_df.empty:
+            bond_row = self.bonds_df[self.bonds_df['isin'] == isin]
+            if not bond_row.empty:
+                actual_issuer = bond_row['issuer_name'].iloc[0]
+        
+        if not actual_issuer:
+            return {
+                "error": "UNKNOWN_ISIN",
+                "message": f"ISIN {isin} not found in database"
+            }
+        
+        # If claimed issuer matches actual issuer, no mismatch
+        if claimed_issuer.lower() == actual_issuer.lower():
+            return {
+                "error": None,
+                "actual_issuer": actual_issuer
+            }
+        
+        # Find similar issuers using fuzzy matching
+        similar_issuers = []
+        if self.bonds_df is not None and not self.bonds_df.empty:
+            unique_issuers = self.bonds_df['issuer_name'].unique()
+            from rapidfuzz import process
+            matches = process.extract(claimed_issuer, unique_issuers, scorer=fuzz.token_sort_ratio)
+            similar_issuers = [m[0] for m in matches if m[1] > 85][:3]  # Top 3 matches with >85% similarity
+        
+        return {
+            "error": "MISMATCH",
+            "actual_issuer": actual_issuer,
+            "similar_issuers": similar_issuers
+        } 

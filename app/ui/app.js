@@ -503,4 +503,145 @@ document.addEventListener('DOMContentLoaded', function() {
             console.error(error);
         }
     }
+
+    function createDownloadButton(data, filename, type) {
+        // Create a button element
+        const button = document.createElement('button');
+        button.className = 'download-btn';
+        button.innerHTML = `<i class="fas fa-download"></i> ${type}`;
+        
+        // Add click event listener
+        button.addEventListener('click', () => {
+            let content = '';
+            let mimeType = '';
+            
+            if (type === 'CSV') {
+                // Convert data to CSV
+                const headers = Object.keys(data[0]).join(',');
+                const rows = data.map(row => Object.values(row).join(',')).join('\n');
+                content = `${headers}\n${rows}`;
+                mimeType = 'text/csv';
+                filename = `${filename}.csv`;
+            } else if (type === 'Excel') {
+                // For Excel, we'll use a simple CSV that Excel can open
+                const headers = Object.keys(data[0]).join(',');
+                const rows = data.map(row => Object.values(row).join(',')).join('\n');
+                content = `${headers}\n${rows}`;
+                mimeType = 'application/vnd.ms-excel';
+                filename = `${filename}.xls`;
+            } else if (type === 'JSON') {
+                // Convert data to JSON
+                content = JSON.stringify(data, null, 2);
+                mimeType = 'application/json';
+                filename = `${filename}.json`;
+            }
+            
+            // Create a blob and download link
+            const blob = new Blob([content], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            
+            // Create download link
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            
+            // Clean up
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+        
+        return button;
+    }
+
+    function addDownloadButtons(container, data, filename) {
+        // Create a container for download buttons
+        const downloadContainer = document.createElement('div');
+        downloadContainer.className = 'download-container';
+        
+        // Add title
+        const title = document.createElement('span');
+        title.textContent = 'Download: ';
+        downloadContainer.appendChild(title);
+        
+        // Add buttons for different formats
+        downloadContainer.appendChild(createDownloadButton(data, filename, 'CSV'));
+        downloadContainer.appendChild(createDownloadButton(data, filename, 'Excel'));
+        downloadContainer.appendChild(createDownloadButton(data, filename, 'JSON'));
+        
+        // Add to container
+        container.appendChild(downloadContainer);
+    }
+
+    function createDocumentPreviewPane(url) {
+        // Create container
+        const container = document.createElement('div');
+        container.className = 'document-preview';
+        
+        // Create iframe for PDF
+        const iframe = document.createElement('iframe');
+        iframe.src = url;
+        iframe.width = '100%';
+        iframe.height = '500px';
+        
+        // Add to container
+        container.appendChild(iframe);
+        
+        return container;
+    }
+
+    function renderTable(data, container) {
+        // Create table
+        const table = document.createElement('table');
+        table.className = 'data-table';
+        
+        // Create header
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        
+        // Add headers
+        Object.keys(data[0]).forEach(key => {
+            const th = document.createElement('th');
+            th.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            headerRow.appendChild(th);
+        });
+        
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+        
+        // Create body
+        const tbody = document.createElement('tbody');
+        
+        // Add rows
+        data.forEach(row => {
+            const tr = document.createElement('tr');
+            
+            // Add cells
+            Object.values(row).forEach(value => {
+                const td = document.createElement('td');
+                
+                // Format value if it's a number
+                if (typeof value === 'number') {
+                    if (value % 1 !== 0) {
+                        td.textContent = value.toFixed(2);
+                    } else {
+                        td.textContent = value;
+                    }
+                } else {
+                    td.textContent = value;
+                }
+                
+                tr.appendChild(td);
+            });
+            
+            tbody.appendChild(tr);
+        });
+        
+        table.appendChild(tbody);
+        container.appendChild(table);
+        
+        // Add download buttons
+        addDownloadButtons(container, data, 'bond_data');
+    }
 }); 

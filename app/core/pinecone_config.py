@@ -49,57 +49,54 @@ class HybridQuery:
 
 def initialize_pinecone():
     """
-    Initialize Pinecone client and create index if it doesn't exist
+    Initialize Pinecone connection and create indexes if they don't exist
     """
-    # Initialize Pinecone
-    pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENVIRONMENT)
+    if not PINECONE_API_KEY:
+        logger.error("Pinecone API key not found. Please set PINECONE_API_KEY in .env file.")
+        return False
     
-    # Check if our index already exists
-    if "bond_metadata" not in pinecone.list_indexes():
-        # Create the bond metadata index
-        logger.info("Creating bond_metadata index")
-        pinecone.create_index(
-            name="bond_metadata",
-            metric="cosine",
-            dimension=768,
-            pods=3,
-            replicas=2
-        )
-        logger.info("Created bond_metadata index")
-    else:
-        logger.info("bond_metadata index already exists")
+    try:
+        # Initialize Pinecone
+        pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENVIRONMENT)
+        
+        # Define indexes to create
+        indexes = {
+            "bond_legal": {
+                "dimension": 768,
+                "metric": "dotproduct",
+                "pods": 2,
+                "replicas": 1
+            },
+            "bond_financial": {
+                "dimension": 768,
+                "metric": "cosine",
+                "pods": 1,
+                "replicas": 1
+            }
+        }
+        
+        # Create indexes if they don't exist
+        existing_indexes = pinecone.list_indexes()
+        
+        for index_name, config in indexes.items():
+            if index_name not in existing_indexes:
+                logger.info(f"Creating index: {index_name}")
+                pinecone.create_index(
+                    name=index_name,
+                    dimension=config["dimension"],
+                    metric=config["metric"],
+                    pods=config["pods"],
+                    replicas=config["replicas"]
+                )
+                logger.info(f"Index {index_name} created successfully")
+            else:
+                logger.info(f"Index {index_name} already exists")
+        
+        return True
     
-    # Check if financial_metrics index exists
-    if "financial_metrics" not in pinecone.list_indexes():
-        # Create the financial metrics index
-        logger.info("Creating financial_metrics index")
-        pinecone.create_index(
-            name="financial_metrics",
-            metric="cosine",
-            dimension=512,
-            pods=2,
-            replicas=1
-        )
-        logger.info("Created financial_metrics index")
-    else:
-        logger.info("financial_metrics index already exists")
-    
-    # Check if cashflow_patterns index exists
-    if "cashflow_patterns" not in pinecone.list_indexes():
-        # Create the cashflow patterns index
-        logger.info("Creating cashflow_patterns index")
-        pinecone.create_index(
-            name="cashflow_patterns",
-            metric="cosine",
-            dimension=256,
-            pods=1,
-            replicas=1
-        )
-        logger.info("Created cashflow_patterns index")
-    else:
-        logger.info("cashflow_patterns index already exists")
-    
-    return get_pinecone_index("bond_metadata")
+    except Exception as e:
+        logger.error(f"Error initializing Pinecone: {str(e)}")
+        return False
 
 def get_pinecone_index(index_name="bond_metadata"):
     """

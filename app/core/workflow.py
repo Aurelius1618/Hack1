@@ -3,7 +3,7 @@ from langgraph.graph import StateGraph, END
 import os
 from dotenv import load_dotenv
 import logging
-from app.utils.model_config import classify_query
+from app.utils.model_config import classify_query, actor_critic_flow
 
 # Load environment variables
 load_dotenv()
@@ -38,6 +38,7 @@ def create_workflow():
     workflow.add_node("finder_agent", handle_finder)
     workflow.add_node("cashflow_agent", handle_cashflow)
     workflow.add_node("screener_agent", handle_screener)
+    workflow.add_node("yield_calculator_agent", handle_yield_calculator)  # Added yield calculator agent
     
     # Add conditional edges based on the orchestrator's decision
     workflow.add_conditional_edges(
@@ -47,7 +48,8 @@ def create_workflow():
             "directory": "directory_agent",
             "finder": "finder_agent",
             "cashflow": "cashflow_agent", 
-            "screener": "screener_agent"
+            "screener": "screener_agent",
+            "yield_calculator": "yield_calculator_agent"  # Added yield calculator edge
         }
     )
     
@@ -56,6 +58,7 @@ def create_workflow():
     workflow.add_edge("finder_agent", END)
     workflow.add_edge("cashflow_agent", END)
     workflow.add_edge("screener_agent", END)
+    workflow.add_edge("yield_calculator_agent", END)  # Added yield calculator edge
     
     # Set entry point
     workflow.set_entry_point("orchestrator")
@@ -89,6 +92,11 @@ def route_query(state: AgentState) -> AgentState:
     state["validation_flags"] = {"isin_valid": isin_match is not None}
     state["financial_context"] = {}
     
+    # Apply contrastive CoT for complex queries
+    if routing_data.get('confidence', 0) < 0.85:
+        contrastive_result = actor_critic_flow(query, state.get("financial_context", {}))
+        state["reasoning_chain"].append(f"Applied contrastive reasoning: {contrastive_result.get('reasoning', '')}")
+    
     logger.info(f"Routing query to {routing_data['next_node']} with confidence {routing_data['confidence']}")
     return state
 
@@ -104,6 +112,7 @@ from app.agents.directory_agent import handle_directory
 from app.agents.finder_agent import handle_finder
 from app.agents.cashflow_agent import handle_cashflow
 from app.agents.screener_agent import handle_screener
+from app.agents.yield_calculator_agent import handle_yield_calculator  # Import yield calculator handler
 
 # Create a singleton instance of the workflow
 workflow = create_workflow() 

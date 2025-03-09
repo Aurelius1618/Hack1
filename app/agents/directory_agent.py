@@ -50,21 +50,21 @@ class DirectoryAgent:
                     "data": None
                 }
             
-            # Check for ISIN-issuer mismatch
+            # Check for ISIN-Issuer mismatch
             if claimed_issuer:
-                # Get actual issuer
-                actual_issuer = None
-                if self.data_processor.bonds_df is not None:
-                    bond_data = self.data_processor.bonds_df[self.data_processor.bonds_df['isin'] == isin]
-                    if not bond_data.empty and 'issuer' in bond_data.columns:
-                        actual_issuer = bond_data['issuer'].iloc[0]
-                
-                # Check for mismatch
-                if actual_issuer and self._check_issuer_mismatch(claimed_issuer, actual_issuer):
-                    return self.handle_isin_mismatch(isin, claimed_issuer)
+                mismatch_info = self._check_issuer_mismatch(isin, claimed_issuer)
+                if mismatch_info.get("error") == "MISMATCH":
+                    return {
+                        "status": "warning",
+                        "message": f"Issuer mismatch: You mentioned {claimed_issuer}, but the actual issuer for {isin} is {mismatch_info['actual_issuer']}",
+                        "data": {
+                            "actual_issuer": mismatch_info["actual_issuer"],
+                            "similar_issuers": mismatch_info.get("similar_issuers", [])
+                        }
+                    }
             
-            # Get bond details using cached lookup
-            bond_details = cached_isin_lookup(isin)
+            # Get bond details
+            bond_details = self.data_processor.get_bond_details(isin)
             
             if bond_details:
                 return {
@@ -269,45 +269,43 @@ class DirectoryAgent:
 
     def _extract_issuer(self, query: str) -> Optional[str]:
         """
-        Extract issuer from query
+        Extract issuer name from query
         
         Args:
             query (str): User query
             
         Returns:
-            Optional[str]: Extracted issuer or None
+            Optional[str]: Issuer name if found
         """
-        # Pattern for issuer
-        patterns = [
-            r"(?:issuer|company|issued by)\s+(?:is|:)?\s+([A-Za-z\s&]+)(?:\.|\,|$)",
-            r"([A-Za-z\s&]+)(?:'s|\s+issued)\s+bond"
+        # Look for patterns like "issuer is X" or "X bond" or "bond from X"
+        issuer_patterns = [
+            r'(?:issuer|company|organization|firm)\s+(?:is|of|named)\s+([A-Za-z0-9\s&]+)',
+            r'([A-Za-z0-9\s&]+)\s+bond',
+            r'bond\s+(?:from|by|issued by)\s+([A-Za-z0-9\s&]+)'
         ]
         
-        for pattern in patterns:
+        for pattern in issuer_patterns:
             match = re.search(pattern, query, re.IGNORECASE)
             if match:
                 return match.group(1).strip()
         
         return None
 
-    def _check_issuer_mismatch(self, claimed_issuer: str, actual_issuer: str) -> bool:
+    def _check_issuer_mismatch(self, isin: str, claimed_issuer: Optional[str]) -> Dict[str, Any]:
         """
-        Check if there is a mismatch between claimed and actual issuer
+        Check for ISIN-Issuer mismatch
         
         Args:
-            claimed_issuer (str): Claimed issuer
-            actual_issuer (str): Actual issuer
+            isin (str): ISIN code
+            claimed_issuer (Optional[str]): Claimed issuer name
             
         Returns:
-            bool: True if mismatch, False otherwise
+            Dict[str, Any]: Mismatch information
         """
-        from rapidfuzz import fuzz
+        if not claimed_issuer:
+            return {"error": None}
         
-        # Calculate similarity
-        similarity = fuzz.token_sort_ratio(claimed_issuer, actual_issuer)
-        
-        # Return True if similarity is below threshold
-        return similarity < 85
+        return self.data_processor.handle_isin_mismatch(isin, claimed_issuer)
 
 # Function to handle directory agent queries in the LangGraph workflow
 def handle_directory(state):
