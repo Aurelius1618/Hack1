@@ -538,6 +538,97 @@ class ScreenerAgent:
             }
         }
 
+    def analyze_ebit_scenarios(self, ebit: float, interest_options: List[float], tax_rate: float, shares: int) -> Dict[str, Any]:
+        """
+        Analyze different capital structure scenarios using EBIT
+        
+        Args:
+            ebit (float): Earnings Before Interest and Taxes
+            interest_options (List[float]): Different interest payment scenarios
+            tax_rate (float): Tax rate as decimal
+            shares (int): Number of shares outstanding
+            
+        Returns:
+            Dict[str, Any]: Analysis results of different scenarios
+        """
+        try:
+            # Validate inputs
+            validation = self.data_processor.validate_ebit_inputs(ebit, None, tax_rate, shares)
+            if validation["status"] == "error":
+                return {
+                    "status": "error",
+                    "message": validation["message"],
+                    "data": None
+                }
+                
+            # Calculate EPS for each interest scenario
+            scenario_results = []
+            for interest in interest_options:
+                # Validate interest
+                interest_validation = self.data_processor.validate_ebit_inputs(None, interest, None, None)
+                if interest_validation["status"] == "error":
+                    continue
+                
+                try:
+                    eps = self.data_processor.calculate_eps(ebit, interest, tax_rate, shares)
+                    scenario_results.append({
+                        "interest_expense": interest,
+                        "eps": eps,
+                        "interest_coverage_ratio": ebit / interest if interest > 0 else float('inf'),
+                        "debt_ratio": interest / ebit if ebit > 0 else float('inf')
+                    })
+                except ValueError as ve:
+                    logger.warning(f"Skipping scenario due to error: {str(ve)}")
+                    continue
+            
+            if not scenario_results:
+                return {
+                    "status": "error",
+                    "message": "No valid scenarios could be calculated",
+                    "data": None
+                }
+                
+            # Sort scenarios by EPS
+            scenario_results.sort(key=lambda x: x["eps"], reverse=True)
+            
+            # Calculate indifference point
+            if len(scenario_results) > 1:
+                # Find the interest level where EPS between two adjacent scenarios are closest
+                min_diff = float('inf')
+                indifference_point = None
+                
+                for i in range(len(scenario_results) - 1):
+                    diff = abs(scenario_results[i]["eps"] - scenario_results[i+1]["eps"])
+                    if diff < min_diff:
+                        min_diff = diff
+                        indifference_point = {
+                            "interest_level": (scenario_results[i]["interest_expense"] + scenario_results[i+1]["interest_expense"]) / 2,
+                            "eps_diff": diff
+                        }
+            else:
+                indifference_point = None
+            
+            return {
+                "status": "success",
+                "message": f"Analyzed {len(scenario_results)} EBIT scenarios",
+                "data": {
+                    "scenarios": scenario_results,
+                    "indifference_point": indifference_point,
+                    "inputs": {
+                        "ebit": ebit,
+                        "tax_rate": tax_rate * 100,  # Convert to percentage for display
+                        "shares": shares
+                    }
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error analyzing EBIT scenarios: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Error analyzing EBIT scenarios: {str(e)}",
+                "data": None
+            }
+
 # Function to handle screener agent queries in the LangGraph workflow
 def handle_screener(state):
     """
@@ -555,8 +646,40 @@ def handle_screener(state):
     agent = ScreenerAgent()
     agent.initialize()
     
-    # Check if we're analyzing a portfolio
-    if "portfolio" in query.lower() and "analyze" in query.lower():
+    # Check if this is an EBIT-related query
+    ebit_match = re.search(r'ebit\s*(?:of|is|at)?\s*(\d+(?:\.\d+)?k?m?b?)', query, re.IGNORECASE)
+    
+    if ebit_match:
+        # Extract EBIT parameters
+        def convert_value(match):
+            if not match:
+                return None
+            val = match.group(1).lower()
+            # Handle k, m, b suffixes
+            if val.endswith('k'):
+                return float(val[:-1]) * 1_000
+            elif val.endswith('m'):
+                return float(val[:-1]) * 1_000_000
+            elif val.endswith('b'):
+                return float(val[:-1]) * 1_000_000_000
+            return float(val)
+        
+        # Extract EBIT value
+        ebit = convert_value(ebit_match)
+        
+        # Extract other parameters
+        interest_matches = re.findall(r'interest\s*(?:of|is|at)?\s*(\d+(?:\.\d+)?k?m?b?)', query, re.IGNORECASE)
+        interest_options = [convert_value(re.match(r'(.*)', interest)) for interest in interest_matches] if interest_matches else [100000, 150000, 200000]  # Default options
+        
+        tax_match = re.search(r'tax\s*(?:rate|percentage)?\s*(?:of|is|at)?\s*(\d+(?:\.\d+)?)\s*%?', query, re.IGNORECASE)
+        tax_rate = float(tax_match.group(1)) / 100 if tax_match else 0.4  # Default 40%
+        
+        shares_match = re.search(r'shares\s*(?:outstanding|count|number)?\s*(?:of|is|at)?\s*(\d+(?:\.\d+)?k?m?b?)', query, re.IGNORECASE)
+        shares = convert_value(shares_match) if shares_match else 50000  # Default 50,000 shares
+        
+        # Analyze EBIT scenarios
+        result = agent.analyze_ebit_scenarios(ebit, interest_options, tax_rate, shares)
+    elif "portfolio" in query.lower() and "analyze" in query.lower():
         # Extract ISINs from query
         isins = re.findall(r'INE[A-Z0-9]{10}', query)
         
@@ -567,7 +690,7 @@ def handle_screener(state):
             # Process as a regular query
             result = agent.process_query(query)
     else:
-        # Process as a regular query
+        # Process normal screening query
         result = agent.process_query(query)
     
     # Update state

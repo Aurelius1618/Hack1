@@ -2,6 +2,7 @@ import os
 import logging
 from typing import Dict, Any
 from dotenv import load_dotenv
+import torch
 
 # Load environment variables
 load_dotenv()
@@ -10,39 +11,49 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+import re
+re.compile('<title>(.*)</title>')
+
 def get_mistral_model():
     """
-    Initialize Mistral-7B model with 4-bit quantization and LoRA adapters
+    Initialize Mistral-7B model with GPU configuration if available, otherwise fallback to CPU
     
     Returns:
-        model: Quantized Mistral-7B model
+        model: Mistral-7B model on GPU or CPU
+        tokenizer: Associated tokenizer
     """
     try:
-        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        from transformers import AutoModelForCausalLM, AutoTokenizer
         from peft import LoraConfig, get_peft_model
-        import torch
         
-        # Configure 4-bit quantization
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_use_double_quant=True
-        )
+        # Check if GPU is available
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device_map = device
         
-        # Load the model with quantization
+        # Set appropriate dtype based on device
+        if device == "cuda":
+            torch_dtype = torch.float16  # Use half precision for GPU to save memory
+            logger.info(f"GPU is available. Using {torch.cuda.get_device_name(0)}")
+        else:
+            torch_dtype = torch.float32
+            logger.warning("GPU not available. Falling back to CPU, which will be significantly slower")
+        
+        # Load the model
         model_id = "mistralai/Mistral-7B-v0.1"
-        logger.info(f"Loading {model_id} with 4-bit quantization...")
+        logger.info(f"Loading {model_id} on {device.upper()}...")
         
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
-            quantization_config=bnb_config,
-            device_map="auto"
+            device_map=device_map,
+            torch_dtype=torch_dtype
         )
         
         # Load tokenizer
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         tokenizer.pad_token = tokenizer.eos_token
+        
+        # Set pad_token_id in the model's generation config to avoid warnings
+        model.generation_config.pad_token_id = tokenizer.pad_token_id
         
         # Configure LoRA adapters for query classification
         lora_config = LoraConfig(
@@ -75,6 +86,9 @@ def classify_query(query: str) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Classification results
     """
+    # Ensure torch is imported
+    import torch
+    
     model, tokenizer = get_mistral_model()
     
     if model is None or tokenizer is None:
@@ -104,7 +118,9 @@ def classify_query(query: str) -> Dict[str, Any]:
                 max_new_tokens=10,
                 temperature=0.1,
                 top_p=0.9,
-                num_return_sequences=1
+                do_sample=True,
+                num_return_sequences=1,
+                pad_token_id=tokenizer.pad_token_id
             )
         
         # Extract classification
@@ -195,8 +211,12 @@ def actor_critic_flow(query: str, context: Dict[str, Any] = None) -> Dict[str, A
         context (Dict[str, Any]): Additional context
         
     Returns:
-        Dict[str, Any]: Best reasoning path and result
+        Dict[str, Any]: Result with reasoning
     """
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    import torch
+    
+    # Load the model and tokenizer
     model, tokenizer = get_mistral_model()
     
     if model is None or tokenizer is None:
@@ -231,7 +251,9 @@ def actor_critic_flow(query: str, context: Dict[str, Any] = None) -> Dict[str, A
                 max_new_tokens=200,
                 temperature=0.7,
                 top_p=0.9,
-                num_return_sequences=1
+                do_sample=True,
+                num_return_sequences=1,
+                pad_token_id=tokenizer.pad_token_id
             )
         
         # Extract reasoning
@@ -272,7 +294,9 @@ def actor_critic_flow(query: str, context: Dict[str, Any] = None) -> Dict[str, A
                 max_new_tokens=10,
                 temperature=0.1,
                 top_p=0.9,
-                num_return_sequences=1
+                do_sample=True,
+                num_return_sequences=1,
+                pad_token_id=tokenizer.pad_token_id
             )
         
         # Extract score

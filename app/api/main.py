@@ -75,7 +75,86 @@ async def process_query(request: QueryRequest):
         # Log the query
         logger.info(f"Processing query: {request.query}")
         
-        # Process the query using the workflow
+        # Check for EBIT-specific queries to handle them properly
+        if "ebit" in request.query.lower():
+            # Extract EBIT-related parameters
+            import re
+            ebit_match = re.search(r'ebit\s*(?:of|is|at)?\s*(\d+(?:\.\d+)?k?m?b?)', request.query, re.IGNORECASE)
+            interest_match = re.search(r'interest\s*(?:of|is|at)?\s*(\d+(?:\.\d+)?k?m?b?)', request.query, re.IGNORECASE)
+            tax_match = re.search(r'tax\s*(?:rate|percentage)?\s*(?:of|is|at)?\s*(\d+(?:\.\d+)?)\s*%?', request.query, re.IGNORECASE)
+            shares_match = re.search(r'shares\s*(?:outstanding|count|number)?\s*(?:of|is|at)?\s*(\d+(?:\.\d+)?k?m?b?)', request.query, re.IGNORECASE)
+            
+            # Convert values if found
+            def convert_value(match):
+                if not match:
+                    return None
+                val = match.group(1).lower()
+                # Handle k, m, b suffixes
+                if val.endswith('k'):
+                    return float(val[:-1]) * 1_000
+                elif val.endswith('m'):
+                    return float(val[:-1]) * 1_000_000
+                elif val.endswith('b'):
+                    return float(val[:-1]) * 1_000_000_000
+                return float(val)
+            
+            # Extract and convert values
+            ebit = convert_value(ebit_match)
+            interest = convert_value(interest_match)
+            tax_rate = tax_match.group(1) if tax_match else None
+            tax_rate = float(tax_rate) / 100 if tax_rate else None  # Convert percentage to decimal
+            shares = convert_value(shares_match)
+            
+            # Initialize data processor
+            from app.data.data_processor import FinancialDataProcessor
+            data_processor = FinancialDataProcessor()
+            data_processor.load_data()
+            
+            # Check if we have enough information for EBIT calculation
+            if ebit is None:
+                logger.error("EBIT value not provided in query")
+                return {
+                    "status": "error",
+                    "message": "EBIT value must be provided for financial calculations. Please specify EBIT amount.",
+                    "data": None
+                }
+                
+            # Validate inputs if they're provided
+            validation = data_processor.validate_ebit_inputs(ebit, interest, tax_rate, shares)
+            if validation["status"] == "error":
+                logger.error(f"EBIT validation error: {validation['message']}")
+                return {
+                    "status": "error",
+                    "message": validation["message"],
+                    "data": None
+                }
+            
+            # If we're calculating EPS and have all required inputs
+            if all([ebit is not None, interest is not None, tax_rate is not None, shares is not None]):
+                try:
+                    eps = data_processor.calculate_eps(ebit, interest, tax_rate, shares)
+                    return {
+                        "status": "success",
+                        "message": "EPS calculated successfully",
+                        "data": {
+                            "eps": eps,
+                            "inputs": {
+                                "ebit": ebit,
+                                "interest": interest,
+                                "tax_rate": tax_rate * 100,  # Convert to percentage for display
+                                "shares": shares
+                            }
+                        }
+                    }
+                except ValueError as ve:
+                    logger.error(f"EBIT calculation error: {str(ve)}")
+                    return {
+                        "status": "error",
+                        "message": f"Invalid input: {str(ve)}",
+                        "data": None
+                    }
+        
+        # Process the query using the workflow for non-EBIT specific queries
         result = workflow.invoke({"query": request.query, "results": {}, "agent_results": {}})
         
         # Extract the agent that processed the query
@@ -90,16 +169,22 @@ async def process_query(request: QueryRequest):
         # Return the response
         return agent_results
     except Exception as e:
-        # Log the error
+        # Log the error with more detail
         logger.error(f"Error processing query: {str(e)}")
+        logger.exception("Detailed error traceback:")
         
         # Record failed query
         performance_monitor.end_query(start_time, "unknown", False, str(e))
         
+        # Provide more detailed error message
+        error_message = str(e)
+        if "ebit" in error_message.lower():
+            error_message = "EBIT calculation error. Please ensure you provided valid numeric values for EBIT and any related parameters (interest, tax rate, shares)."
+        
         # Return error response
         return {
             "status": "error",
-            "message": f"Error processing query: {str(e)}",
+            "message": f"Error processing query: {error_message}",
             "data": None
         }
 

@@ -6,6 +6,7 @@ from rapidfuzz import fuzz
 from sklearn.ensemble import IsolationForest
 from datetime import datetime
 import logging
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -77,24 +78,56 @@ class FinancialDataProcessor:
         Clean the loaded data
         """
         if self.bonds_df is not None:
+            # Convert date columns to datetime
+            date_columns = ['created_at', 'updated_at', 'allotment_date', 'maturity_date']
+            for col in date_columns:
+                if col in self.bonds_df.columns:
+                    self.bonds_df[col] = pd.to_datetime(self.bonds_df[col], errors='coerce')
+            
             # Basic cleaning for bonds data
             self.bonds_df = self.bonds_df.fillna({
-                'yield': 0.0,
-                'rating': 'NR',
+                'isin': '',
+                'company_name': 'Unknown',
+                'issue_size': 0.0,
                 'maturity_date': pd.Timestamp.now() + pd.DateOffset(years=5)
             })
         
         if self.company_df is not None:
+            # Convert date columns to datetime
+            date_columns = ['created_at', 'updated_at']
+            for col in date_columns:
+                if col in self.company_df.columns:
+                    self.company_df[col] = pd.to_datetime(self.company_df[col], errors='coerce')
+            
             # Basic cleaning for company data
-            self.company_df = self.company_df.fillna(0)
+            self.company_df = self.company_df.fillna({
+                'company_name': 'Unknown',
+                'company_industry': 'Unknown',
+                'description': '',
+                'key_metrics': '',
+                'pros': '',
+                'cons': ''
+            })
             
             # Calculate financial ratios
             self._calculate_financial_ratios()
         
         if self.cashflow_df is not None:
-            # Basic cleaning for cashflow data
-            self.cashflow_df['payment_date'] = pd.to_datetime(self.cashflow_df['payment_date'])
-            self.cashflow_df = self.cashflow_df.sort_values(['isin', 'payment_date'])
+            # Convert date columns to datetime
+            date_columns = ['created_at', 'updated_at', 'cash_flow_date', 'record_date']
+            for col in date_columns:
+                if col in self.cashflow_df.columns:
+                    self.cashflow_df[col] = pd.to_datetime(self.cashflow_df[col], errors='coerce')
+            
+            # Convert numeric columns
+            numeric_columns = ['cash_flow_amount', 'principal_amount', 'interest_amount', 
+                              'tds_amount', 'remaining_principal']
+            for col in numeric_columns:
+                if col in self.cashflow_df.columns:
+                    self.cashflow_df[col] = pd.to_numeric(self.cashflow_df[col], errors='coerce').fillna(0)
+            
+            # Sort cashflows by ISIN and date
+            self.cashflow_df = self.cashflow_df.sort_values(['isin', 'cash_flow_date'])
             
     def _calculate_financial_ratios(self) -> None:
         """
@@ -103,32 +136,96 @@ class FinancialDataProcessor:
         if self.company_df is None:
             logger.warning("Company data not loaded, cannot calculate financial ratios")
             return
+        
+        try:
+            # The financial data is stored in JSON columns, so we need to parse them
+            # Add a column to store calculated ratios
+            self.company_df['calculated_ratios'] = None
             
-        # Calculate Interest Coverage Ratio = EBIT / Interest Expense
-        self.company_df['interest_coverage_ratio'] = self.company_df['ebit'] / self.company_df['interest_expense'].replace(0, 0.001)
+            for idx, row in self.company_df.iterrows():
+                ratios = {}
+                
+                # Try to extract financial metrics from the JSON columns
+                try:
+                    # Parse JSON columns if they're strings
+                    key_metrics = row['key_metrics']
+                    if isinstance(key_metrics, str) and key_metrics:
+                        try:
+                            key_metrics = json.loads(key_metrics)
+                        except:
+                            key_metrics = {}
+                    
+                    income_statement = row['income_statement']
+                    if isinstance(income_statement, str) and income_statement:
+                        try:
+                            income_statement = json.loads(income_statement)
+                        except:
+                            income_statement = {}
+                    
+                    balance_sheet = row['balance_sheet']
+                    if isinstance(balance_sheet, str) and balance_sheet:
+                        try:
+                            balance_sheet = json.loads(balance_sheet)
+                        except:
+                            balance_sheet = {}
+                    
+                    cashflow_data = row['cashflow']
+                    if isinstance(cashflow_data, str) and cashflow_data:
+                        try:
+                            cashflow_data = json.loads(cashflow_data)
+                        except:
+                            cashflow_data = {}
+                    
+                    # Extract values needed for ratio calculations
+                    # These are examples - adjust based on actual JSON structure
+                    ebit = self._safe_get(income_statement, 'ebit', 0)
+                    interest_expense = self._safe_get(income_statement, 'interest_expense', 0.001)
+                    net_income = self._safe_get(income_statement, 'net_income', 0)
+                    depreciation = self._safe_get(cashflow_data, 'depreciation', 0)
+                    total_debt = self._safe_get(balance_sheet, 'total_debt', 0.001)
+                    current_assets = self._safe_get(balance_sheet, 'current_assets', 0)
+                    current_liabilities = self._safe_get(balance_sheet, 'current_liabilities', 0.001)
+                    shareholders_equity = self._safe_get(balance_sheet, 'shareholders_equity', 0.001)
+                    
+                    # Calculate ratios
+                    ratios['interest_coverage_ratio'] = ebit / interest_expense
+                    ratios['debt_service_coverage_ratio'] = (net_income + depreciation) / total_debt
+                    ratios['current_ratio'] = current_assets / current_liabilities
+                    ratios['debt_to_equity'] = total_debt / shareholders_equity
+                    
+                    # Store calculated ratios
+                    self.company_df.at[idx, 'calculated_ratios'] = json.dumps(ratios)
+                    
+                except Exception as e:
+                    logger.warning(f"Error calculating ratios for company {row.get('company_name', 'Unknown')}: {str(e)}")
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"Error in financial ratio calculations: {str(e)}")
+    
+    def _safe_get(self, data, key, default=0):
+        """
+        Safely get a value from a dictionary, handling None values and missing keys
         
-        # Calculate Debt Service Coverage Ratio = (Net Income + Depreciation) / Total Debt
-        self.company_df['debt_service_coverage_ratio'] = (self.company_df['net_income'] + self.company_df['depreciation']) / self.company_df['total_debt'].replace(0, 0.001)
+        Args:
+            data (dict): Dictionary to get value from
+            key (str): Key to get
+            default: Default value if key is missing or None
+            
+        Returns:
+            Value from dictionary or default
+        """
+        if data is None or not isinstance(data, dict):
+            return default
         
-        # Calculate Current Ratio = Current Assets / Current Liabilities
-        self.company_df['current_ratio'] = self.company_df['current_assets'] / self.company_df['current_liabilities'].replace(0, 0.001)
+        value = data.get(key, default)
+        if value is None or (isinstance(value, (int, float)) and np.isnan(value)):
+            return default
         
-        # Calculate Debt to Equity Ratio = Total Debt / Shareholders Equity
-        self.company_df['debt_to_equity'] = self.company_df['total_debt'] / self.company_df['shareholders_equity'].replace(0, 0.001)
-        
-        # Calculate Return on Assets = Net Income / Total Assets
-        self.company_df['return_on_assets'] = self.company_df['net_income'] / self.company_df['total_assets'].replace(0, 0.001)
-        
-        # Calculate Return on Equity = Net Income / Shareholders Equity
-        self.company_df['return_on_equity'] = self.company_df['net_income'] / self.company_df['shareholders_equity'].replace(0, 0.001)
-        
-        # Calculate Profit Margin = Net Income / Revenue
-        self.company_df['profit_margin'] = self.company_df['net_income'] / self.company_df['revenue'].replace(0, 0.001)
-        
-        # Calculate Asset Turnover = Revenue / Total Assets
-        self.company_df['asset_turnover'] = self.company_df['revenue'] / self.company_df['total_assets'].replace(0, 0.001)
-        
-        logger.info("Calculated financial ratios for company data")
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
     
     def entity_resolution(self, threshold: float = 85.0) -> Dict[str, str]:
         """
@@ -177,7 +274,7 @@ class FinancialDataProcessor:
         WAL = Σ(t_i × CF_i) / Σ(CF_i)
         
         Args:
-            df (pd.DataFrame): Cash flow data with payment_date and amount columns
+            df (pd.DataFrame): Cash flow data with cash_flow_date and cash_flow_amount columns
             
         Returns:
             float: Weighted Average Life in years
@@ -185,23 +282,23 @@ class FinancialDataProcessor:
         if df is None or df.empty:
             return None
         
-        # Ensure payment_date is datetime
-        if not pd.api.types.is_datetime64_dtype(df['payment_date']):
-            df['payment_date'] = pd.to_datetime(df['payment_date'])
+        # Ensure cash_flow_date is datetime
+        if not pd.api.types.is_datetime64_dtype(df['cash_flow_date']):
+            df['cash_flow_date'] = pd.to_datetime(df['cash_flow_date'])
         
         # Calculate days from now to each payment date
         now = datetime.now()
-        df['days'] = (df['payment_date'] - now).dt.days
+        df['days'] = (df['cash_flow_date'] - now).dt.days
         
         # Convert days to years
         df['years'] = df['days'] / 365.25
         
         # Calculate weighted average
-        total_cf = df['amount'].sum()
+        total_cf = df['cash_flow_amount'].sum()
         if total_cf == 0:
             return None
         
-        wal = (df['years'] * df['amount']).sum() / total_cf
+        wal = (df['years'] * df['cash_flow_amount']).sum() / total_cf
         
         return wal
     
@@ -226,10 +323,10 @@ class FinancialDataProcessor:
             return []
         
         # Extract features for anomaly detection
-        features = bond_cashflows[['amount']].copy()
+        features = bond_cashflows[['cash_flow_amount']].copy()
         
         # Add time difference between payments as a feature
-        payment_dates = bond_cashflows['payment_date'].sort_values()
+        payment_dates = bond_cashflows['cash_flow_date'].sort_values()
         time_diffs = payment_dates.diff().dt.days.fillna(0)
         features['time_diff'] = time_diffs.values
         
@@ -309,8 +406,24 @@ class FinancialDataProcessor:
         # Convert to dictionary
         bond_dict = bond_data.iloc[0].to_dict()
         
+        # Parse JSON fields if they exist
+        json_fields = ['issuer_details', 'instrument_details', 'coupon_details', 
+                      'redemption_details', 'credit_rating_details', 'listing_details',
+                      'key_contacts_details', 'key_documents_details']
+        
+        for field in json_fields:
+            if field in bond_dict and isinstance(bond_dict[field], str):
+                try:
+                    bond_dict[field] = json.loads(bond_dict[field])
+                except:
+                    # Keep as string if not valid JSON
+                    pass
+        
         # Add WAL
-        bond_dict['wal'] = self.calculate_weighted_average_life(self.cashflow_df[self.cashflow_df['isin'] == isin])
+        if self.cashflow_df is not None:
+            cashflow_data = self.cashflow_df[self.cashflow_df['isin'] == isin]
+            if not cashflow_data.empty:
+                bond_dict['wal'] = self.calculate_weighted_average_life(cashflow_data)
         
         return bond_dict
     
@@ -333,8 +446,8 @@ class FinancialDataProcessor:
             logger.warning(f"No cashflow data found for ISIN {isin}")
             return None
         
-        # Sort by payment date
-        cashflows = cashflows.sort_values('payment_date')
+        # Sort by cash flow date
+        cashflows = cashflows.sort_values('cash_flow_date')
         
         # Detect anomalies
         anomaly_indices = self.detect_cashflow_anomalies(isin)
@@ -365,36 +478,101 @@ class FinancialDataProcessor:
         # Get bond details
         bond = bond_data.iloc[0]
         
-        # Get day count convention (default to 30/360)
-        dcc = bond.get('day_count', '30/360')
+        # Parse coupon details if it's a JSON string
+        coupon_details = bond.get('coupon_details', {})
+        if isinstance(coupon_details, str):
+            try:
+                coupon_details = json.loads(coupon_details)
+            except:
+                coupon_details = {}
         
-        # Get issue date and coupon rate
-        issue_date = bond.get('issue_date')
-        if issue_date is None:
-            logger.warning(f"No issue date found for ISIN {isin}")
+        # Get day count convention (default to 30/360)
+        dcc = coupon_details.get('day_count_convention', '30/360')
+        
+        # Get allotment date and coupon rate
+        allotment_date = bond.get('allotment_date')
+        if allotment_date is None:
+            logger.warning(f"No allotment date found for ISIN {isin}")
             return None
         
-        rate = bond.get('coupon_rate', 0) / 100  # Convert percentage to decimal
-        principal = bond.get('face_value', 1000)
+        # Ensure allotment_date is a datetime
+        if not isinstance(allotment_date, datetime):
+            try:
+                allotment_date = pd.to_datetime(allotment_date)
+            except:
+                logger.warning(f"Invalid allotment date for ISIN {isin}")
+                return None
         
-        # Calculate days based on day count convention
+        # Get coupon rate from coupon details
+        coupon_rate = coupon_details.get('coupon_rate')
+        if coupon_rate is None:
+            logger.warning(f"No coupon rate found for ISIN {isin}")
+            return None
+        
+        # Convert coupon rate to float if it's a string
+        if isinstance(coupon_rate, str):
+            try:
+                coupon_rate = float(coupon_rate.strip('%')) / 100
+            except:
+                logger.warning(f"Invalid coupon rate for ISIN {isin}")
+                return None
+        
+        # Calculate accrued interest based on day count convention
         if dcc == '30/360':
             # 30/360 convention
-            years = (settlement_date.year - issue_date.year)
-            months = (settlement_date.month - issue_date.month)
-            days = min(30, settlement_date.day) - min(30, issue_date.day)
-            
-            total_days = years * 360 + months * 30 + days
             days_in_year = 360
-        else:
-            # ACT/ACT convention
-            total_days = (settlement_date - issue_date).days
+            days_elapsed = self._calculate_30_360_days(allotment_date, settlement_date)
+        elif dcc == 'ACT/365':
+            # Actual/365 convention
             days_in_year = 365
+            days_elapsed = (settlement_date - allotment_date).days
+        elif dcc == 'ACT/ACT':
+            # Actual/Actual convention
+            days_in_year = 366 if self._is_leap_year(settlement_date.year) else 365
+            days_elapsed = (settlement_date - allotment_date).days
+        else:
+            # Default to Actual/360
+            days_in_year = 360
+            days_elapsed = (settlement_date - allotment_date).days
         
         # Calculate accrued interest
-        accrued_interest = principal * rate * total_days / days_in_year
+        accrued_interest = (coupon_rate * days_elapsed) / days_in_year
         
         return accrued_interest
+    
+    def _calculate_30_360_days(self, start_date: datetime, end_date: datetime) -> int:
+        """
+        Calculate days between two dates using 30/360 convention
+        
+        Args:
+            start_date (datetime): Start date
+            end_date (datetime): End date
+            
+        Returns:
+            int: Number of days
+        """
+        y1, m1, d1 = start_date.year, start_date.month, start_date.day
+        y2, m2, d2 = end_date.year, end_date.month, end_date.day
+        
+        # Adjust for end of month
+        if d1 == 31:
+            d1 = 30
+        if d2 == 31 and d1 >= 30:
+            d2 = 30
+            
+        return (360 * (y2 - y1) + 30 * (m2 - m1) + (d2 - d1))
+    
+    def _is_leap_year(self, year: int) -> bool:
+        """
+        Check if a year is a leap year
+        
+        Args:
+            year (int): Year to check
+            
+        Returns:
+            bool: True if leap year, False otherwise
+        """
+        return (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0)
     
     def calculate_z_score(self, row) -> float:
         """
@@ -439,6 +617,72 @@ class FinancialDataProcessor:
         except Exception as e:
             logger.error(f"Error calculating Z-Score: {str(e)}")
             return 0.0
+    
+    def validate_ebit_inputs(self, ebit=None, interest=None, tax_rate=None, shares=None):
+        """
+        Validate inputs for EBIT-related calculations
+        
+        Args:
+            ebit (float, optional): Earnings Before Interest and Taxes
+            interest (float, optional): Interest payments
+            tax_rate (float, optional): Tax rate (as decimal)
+            shares (int, optional): Number of shares outstanding
+            
+        Returns:
+            Dict[str, Any]: Validation result with status and message
+        """
+        # Validate EBIT
+        if ebit is not None and not isinstance(ebit, (int, float)):
+            return {"status": "error", "message": "EBIT must be a numeric value"}
+            
+        # Validate interest
+        if interest is not None:
+            if not isinstance(interest, (int, float)):
+                return {"status": "error", "message": "Interest must be a numeric value"}
+                
+        # Validate tax rate
+        if tax_rate is not None:
+            if not isinstance(tax_rate, (int, float)):
+                return {"status": "error", "message": "Tax rate must be a numeric value"}
+            if tax_rate < 0 or tax_rate > 1:
+                return {"status": "error", "message": "Tax rate must be between 0 and 1"}
+                
+        # Validate shares
+        if shares is not None:
+            if not isinstance(shares, (int, float)):
+                return {"status": "error", "message": "Shares must be a numeric value"}
+            if shares <= 0:
+                return {"status": "error", "message": "Shares outstanding must be greater than zero"}
+                
+        # All validations passed
+        return {"status": "success", "message": "All inputs validated"}
+        
+    def calculate_eps(self, ebit, interest, tax_rate, shares):
+        """
+        Calculate Earnings Per Share (EPS) using EBIT
+        Formula: EPS = (EBIT - Interest) * (1 - Tax Rate) / Shares Outstanding
+        
+        Args:
+            ebit (float): Earnings Before Interest and Taxes
+            interest (float): Interest payments
+            tax_rate (float): Tax rate (as decimal)
+            shares (float): Number of shares outstanding
+            
+        Returns:
+            float: Earnings Per Share
+        """
+        # Validate inputs
+        validation = self.validate_ebit_inputs(ebit, interest, tax_rate, shares)
+        if validation["status"] == "error":
+            raise ValueError(validation["message"])
+            
+        try:
+            return ((ebit - interest) * (1 - tax_rate)) / shares
+        except ZeroDivisionError:
+            raise ValueError("Shares outstanding cannot be zero")
+        except Exception as e:
+            logger.error(f"Error calculating EPS: {str(e)}")
+            raise ValueError(f"EPS calculation error: {str(e)}")
     
     def handle_isin_mismatch(self, isin: str, claimed_issuer: str) -> Dict[str, Any]:
         """

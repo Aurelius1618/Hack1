@@ -3,7 +3,7 @@ from langgraph.graph import StateGraph, END
 import os
 from dotenv import load_dotenv
 import logging
-from app.utils.model_config import classify_query, actor_critic_flow
+from app.utils.model_config import classify_query, fallback_classify_query, actor_critic_flow
 
 # Load environment variables
 load_dotenv()
@@ -70,7 +70,7 @@ def create_workflow():
 def route_query(state: AgentState) -> AgentState:
     """
     Initial routing function that analyzes the query and adds routing data
-    Uses Mistral-7B (4-bit quantized) with LoRA adapters for classification
+    Uses fallback classification for routing
     """
     query = state["query"]
     
@@ -80,8 +80,14 @@ def route_query(state: AgentState) -> AgentState:
     if isin_match:
         state["isin"] = isin_match.group(0)
     
-    # Use the Mistral-7B model for classification
-    routing_data = classify_query(query)
+    # Check for EBIT-related queries
+    ebit_pattern = r'\bebit\b|\bearnings\s+before\s+interest\s+and\s+tax(es)?\b'
+    if re.search(ebit_pattern, query, re.IGNORECASE):
+        # Route EBIT queries to the screener agent which can handle financial calculations
+        routing_data = {"next_node": "screener", "confidence": 0.95, "query_type": "financial_analysis"}
+    else:
+        # Use the fallback classification for other queries
+        routing_data = fallback_classify_query(query)
     
     # Update the state
     state["routing_data"] = routing_data
@@ -92,10 +98,7 @@ def route_query(state: AgentState) -> AgentState:
     state["validation_flags"] = {"isin_valid": isin_match is not None}
     state["financial_context"] = {}
     
-    # Apply contrastive CoT for complex queries
-    if routing_data.get('confidence', 0) < 0.85:
-        contrastive_result = actor_critic_flow(query, state.get("financial_context", {}))
-        state["reasoning_chain"].append(f"Applied contrastive reasoning: {contrastive_result.get('reasoning', '')}")
+    # Skip contrastive CoT for now as it might require the model
     
     logger.info(f"Routing query to {routing_data['next_node']} with confidence {routing_data['confidence']}")
     return state
