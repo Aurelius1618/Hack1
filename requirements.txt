@@ -1,0 +1,51 @@
+# Core dependencies
+langchain>=0.1.0
+langchain-community>=0.0.10
+langchain-text-splitters>=0.0.1
+langgraph>=0.0.15
+pinecone-client>=2.2.2
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+lamini>=2.0.0  # Added for Lamini API
+
+# Machine learning and NLP
+transformers>=4.30.0
+sentence-transformers>=2.2.2
+xgboost>=1.7.5
+shap>=0.42.0
+scikit-learn>=1.2.2
+rank_bm25>=0.2.2
+nltk>=3.8.1
+torch>=2.0.0  # Added for PyTorch
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+pymupdf>=1.22.0  # For PDF processing
+rapidfuzz>=3.0.0  # For fuzzy matching
+dask>=2023.5.0  # For parallel processing
+businessdate>=0.9.0  # For business date calculations
+scipy>=1.10.0  # For optimization algorithms
+
+# Monitoring and logging
+prometheus-client>=0.17.0
+logging>=0.4.9.6
+
+# Web API
+fastapi>=0.100.0
+uvicorn>=0.22.0
+jinja2>=3.1.2  # For templating
+aiofiles>=23.1.0  # For async file operations
+
+# Testing
+pytest>=7.3.1
+pytest-cov>=4.1.0
+
+# Documentation
+sphinx>=7.0.0
+sphinx-rtd-theme>=1.2.0
+
+# PDF Preview and Document Handling
+PyPDF2>=3.0.0
+pdf2image>=1.16.3
+Pillow>=10.0.0  # For image processing

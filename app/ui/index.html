@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tap Bonds AI Layer</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header class="my-4">
+            <h1 class="text-center">Tap Bonds AI Layer</h1>
+            <p class="text-center lead">AI-powered bond analysis system</p>
+        </header>
+
+        <div class="row">
+            <div class="col-md-8 offset-md-2">
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h2 class="card-title">Ask about bonds</h2>
+                        <div class="input-group mb-3">
+                            <input type="text" id="query-input" class="form-control" placeholder="Ask a question about bonds...">
+                            <button class="btn btn-primary" id="query-button">Ask</button>
+                        </div>
+                        <div class="form-text">
+                            Example: "Find bonds with yield above 5% in the technology sector"
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h3>Results</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="results-container">
+                            <div class="text-center text-muted">
+                                <p>Ask a question to see results</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h3 class="card-title">Bond Directory</h3>
+                        <p class="card-text">Search for bonds by ISIN or keywords</p>
+                        <div class="input-group mb-3">
+                            <input type="text" id="isin-input" class="form-control" placeholder="Enter ISIN...">
+                            <button class="btn btn-outline-primary" id="isin-button">Search</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h3 class="card-title">Bond Comparison</h3>
+                        <p class="card-text">Compare multiple bonds</p>
+                        <div class="input-group mb-3">
+                            <input type="text" id="compare-input" class="form-control" placeholder="Enter ISINs separated by commas...">
+                            <button class="btn btn-outline-primary" id="compare-button">Compare</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h3 class="card-title">Portfolio Analysis</h3>
+                        <p class="card-text">Analyze a portfolio of bonds</p>
+                        <div class="input-group mb-3">
+                            <input type="text" id="portfolio-input" class="form-control" placeholder="Enter ISINs separated by commas...">
+                            <button class="btn btn-outline-primary" id="portfolio-button">Analyze</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Bond Screener</h3>
+                    </div>
+                    <div class="card-body">
+                        <form id="screener-form">
+                            <div class="row">
+                                <div class="col-md-3 mb-3">
+                                    <label for="min-yield" class="form-label">Min Yield (%)</label>
+                                    <input type="number" class="form-control" id="min-yield" step="0.1">
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label for="max-yield" class="form-label">Max Yield (%)</label>
+                                    <input type="number" class="form-control" id="max-yield" step="0.1">
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label for="rating" class="form-label">Rating</label>
+                                    <select class="form-select" id="rating">
+                                        <option value="">Any</option>
+                                        <option value="AAA">AAA</option>
+                                        <option value="AA">AA</option>
+                                        <option value="A">A</option>
+                                        <option value="BBB">BBB</option>
+                                        <option value="BB">BB</option>
+                                        <option value="B">B</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label for="sector" class="form-label">Sector</label>
+                                    <select class="form-select" id="sector">
+                                        <option value="">Any</option>
+                                        <option value="technology">Technology</option>
+                                        <option value="healthcare">Healthcare</option>
+                                        <option value="finance">Finance</option>
+                                        <option value="energy">Energy</option>
+                                        <option value="consumer">Consumer</option>
+                                        <option value="industrial">Industrial</option>
+                                        <option value="utilities">Utilities</option>
+                                        <option value="telecom">Telecom</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-3 mb-3">
+                                    <label for="min-maturity" class="form-label">Min Maturity (years)</label>
+                                    <input type="number" class="form-control" id="min-maturity">
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label for="max-maturity" class="form-label">Max Maturity (years)</label>
+                                    <input type="number" class="form-control" id="max-maturity">
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label for="issuer-type" class="form-label">Issuer Type</label>
+                                    <select class="form-select" id="issuer-type">
+                                        <option value="">Any</option>
+                                        <option value="corporate">Corporate</option>
+                                        <option value="government">Government</option>
+                                        <option value="municipal">Municipal</option>
+                                        <option value="sovereign">Sovereign</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 mb-3">
+                                    <label for="financial-health" class="form-label">Financial Health</label>
+                                    <select class="form-select" id="financial-health">
+                                        <option value="">Any</option>
+                                        <option value="Good">Good</option>
+                                        <option value="Average">Average</option>
+                                        <option value="Poor">Poor</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="text-center">
+                                <button type="submit" class="btn btn-primary">Screen Bonds</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-light py-3 mt-5">
+        <div class="container text-center">
+            <p>Tap Bonds AI Layer &copy; 2023</p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html> 
